@@ -1,0 +1,26 @@
+[package]
+name = "rwkv7"
+version = "0.1.0"
+edition = "2021"
+description = "RWKV-7 \"Goose\" x070 inference in pure Rust, plus HF checkpoint tooling"
+license = "Apache-2.0"
+
+[dependencies]
+# none, on purpose: zip/pickle/json readers and writers are all in-tree
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[lib]
+name = "rwkv7"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rwkv7"
+path = "src/main.rs"
+
+[[bin]]
+name = "qwen-make-pth"
+path = "src/bin/qwen_make_pth.rs"

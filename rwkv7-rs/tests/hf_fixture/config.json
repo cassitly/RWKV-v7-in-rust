@@ -1,0 +1,18 @@
+{
+  "architectures": [
+    "Qwen3NextForCausalLM"
+  ],
+  "hidden_size": 32,
+  "num_hidden_layers": 2,
+  "torch_dtype": "bfloat16",
+  "vocab_size": 64,
+  "nested": {
+    "a": [
+      1,
+      2,
+      3
+    ],
+    "b": null
+  },
+  "unicode_note": "caf\u00e9 \ud83d\ude80"
+}

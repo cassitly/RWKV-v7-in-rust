@@ -1,0 +1,10 @@
+/target
+__pycache__/
+
+# checkpoints are large; test fixtures are the exception
+*.pth
+*.safetensors
+*.npz
+!tests/tiny.pth
+!tests/tiny.safetensors
+!tests/hf_fixture/*.safetensors
