@@ -1,0 +1,13 @@
+# Local build products and editor/OS files.
+**/target/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+
+# Keep downloaded models outside version control. Bundled fixtures are retained.
+*.pth
+*.safetensors
+*.npz
+!rwkv7-rs/tests/tiny.pth
+!rwkv7-rs/tests/tiny.safetensors
+!rwkv7-rs/tests/hf_fixture/*.safetensors

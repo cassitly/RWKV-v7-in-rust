@@ -140,12 +140,22 @@ impl ZipArchive {
             }
             let _ = comp_size;
 
-            entries.insert(name.clone(), Entry { local_header_offset: local_off, size: uncomp_size });
+            entries.insert(
+                name.clone(),
+                Entry {
+                    local_header_offset: local_off,
+                    size: uncomp_size,
+                },
+            );
             names.push(name);
             p += 46 + name_len + extra_len + comment_len;
         }
 
-        Ok(ZipArchive { file, entries, names })
+        Ok(ZipArchive {
+            file,
+            entries,
+            names,
+        })
     }
 
     pub fn names(&self) -> &[String] {

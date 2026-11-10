@@ -111,23 +111,37 @@ fn parse_literal(src: &str) -> Option<Vec<u8>> {
 impl Tokenizer {
     pub fn from_file(path: &str) -> io::Result<Self> {
         let text = std::fs::read_to_string(path)?;
-        let mut nodes = vec![Node { children: Vec::new(), token: None }];
+        let mut nodes = vec![Node {
+            children: Vec::new(),
+            token: None,
+        }];
         let mut id_to_bytes: Vec<Vec<u8>> = Vec::new();
 
         for (lineno, line) in text.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
-            let Some(first) = line.find(' ') else { continue };
-            let Some(last) = line.rfind(' ') else { continue };
+            let Some(first) = line.find(' ') else {
+                continue;
+            };
+            let Some(last) = line.rfind(' ') else {
+                continue;
+            };
             if last <= first {
                 continue;
             }
-            let Ok(id) = line[..first].parse::<u32>() else { continue };
-            let Ok(want_len) = line[last + 1..].trim().parse::<usize>() else { continue };
+            let Ok(id) = line[..first].parse::<u32>() else {
+                continue;
+            };
+            let Ok(want_len) = line[last + 1..].trim().parse::<usize>() else {
+                continue;
+            };
 
             let Some(bytes) = parse_literal(&line[first + 1..last]) else {
-                return err(format!("vocab line {}: cannot parse token literal", lineno + 1));
+                return err(format!(
+                    "vocab line {}: cannot parse token literal",
+                    lineno + 1
+                ));
             };
             // The trailing length column is a free consistency check on the parser.
             if bytes.len() != want_len {
@@ -145,12 +159,18 @@ impl Tokenizer {
 
             let mut cur = 0u32;
             for b in bytes {
-                let idx = nodes[cur as usize].children.iter().position(|(c, _)| *c == b);
+                let idx = nodes[cur as usize]
+                    .children
+                    .iter()
+                    .position(|(c, _)| *c == b);
                 cur = match idx {
                     Some(i) => nodes[cur as usize].children[i].1,
                     None => {
                         let new = nodes.len() as u32;
-                        nodes.push(Node { children: Vec::new(), token: None });
+                        nodes.push(Node {
+                            children: Vec::new(),
+                            token: None,
+                        });
                         nodes[cur as usize].children.push((b, new));
                         new
                     }
@@ -282,7 +302,10 @@ mod tests {
                 got,
                 expect,
                 "mismatch on {:?}",
-                String::from_utf8_lossy(&bytes).chars().take(60).collect::<String>()
+                String::from_utf8_lossy(&bytes)
+                    .chars()
+                    .take(60)
+                    .collect::<String>()
             );
             assert_eq!(tk.decode_bytes(&got), bytes, "decode did not invert encode");
             cases += 1;

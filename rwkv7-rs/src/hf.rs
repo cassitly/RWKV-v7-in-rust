@@ -52,7 +52,10 @@ pub struct ShardTensor {
 
 impl ShardTensor {
     pub fn numel(&self) -> usize {
-        self.shape.iter().product::<usize>().max(if self.shape.is_empty() { 1 } else { 0 })
+        self.shape
+            .iter()
+            .product::<usize>()
+            .max(if self.shape.is_empty() { 1 } else { 0 })
     }
 }
 
@@ -97,7 +100,14 @@ pub fn resolve_model_dir(name: &str, local_files_only: bool) -> io::Result<PathB
         }
         eprintln!("{name} is not a local path; fetching with `{cli} download`...");
         let out = std::process::Command::new(cli)
-            .args(["download", name, "--include", "config.json", "--include", "*.safetensors"])
+            .args([
+                "download",
+                name,
+                "--include",
+                "config.json",
+                "--include",
+                "*.safetensors",
+            ])
             .args(["--include", "*.safetensors.index.json"])
             .output()?;
         if !out.status.success() {
@@ -117,7 +127,9 @@ pub fn resolve_model_dir(name: &str, local_files_only: bool) -> io::Result<PathB
         if Path::new(&path).is_dir() {
             return Ok(PathBuf::from(path));
         }
-        return err(format!("`{cli} download` succeeded but its output path was not a directory: {path:?}"));
+        return err(format!(
+            "`{cli} download` succeeded but its output path was not a directory: {path:?}"
+        ));
     }
 
     err(format!(
@@ -145,11 +157,19 @@ fn glob_ext(root: &Path, ext: &str) -> io::Result<Vec<PathBuf>> {
 /// the `sorted(set(...))` the Python script uses.
 fn files_from_index(root: &Path, index_path: &Path) -> io::Result<Vec<PathBuf>> {
     let text = std::fs::read_to_string(index_path)?;
-    let j = json::parse(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", index_path.display())))?;
+    let j = json::parse(&text).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: {e}", index_path.display()),
+        )
+    })?;
     let Some(map) = j.get("weight_map").and_then(|m| m.as_obj()) else {
         return err(format!("{}: no weight_map object", index_path.display()));
     };
-    let mut names: Vec<String> = map.iter().filter_map(|(_, v)| v.as_str().map(str::to_string)).collect();
+    let mut names: Vec<String> = map
+        .iter()
+        .filter_map(|(_, v)| v.as_str().map(str::to_string))
+        .collect();
     names.sort();
     names.dedup();
     Ok(names.into_iter().map(|n| root.join(n)).collect())
@@ -181,9 +201,16 @@ pub fn scan_dir(root: &Path) -> io::Result<Vec<ShardTensor>> {
     let mut out = Vec::new();
     for f in &files {
         if !f.exists() {
-            return err(format!("shard listed in the index is missing: {}", f.display()));
+            return err(format!(
+                "shard listed in the index is missing: {}",
+                f.display()
+            ));
         }
-        let mut part = if is_safetensors { scan_safetensors(f)? } else { scan_pth(f)? };
+        let mut part = if is_safetensors {
+            scan_safetensors(f)?
+        } else {
+            scan_pth(f)?
+        };
         out.append(&mut part);
     }
     Ok(out)
@@ -197,16 +224,26 @@ pub fn scan_safetensors(path: &Path) -> io::Result<Vec<ShardTensor>> {
     f.read_exact(&mut len8)?;
     let header_len = u64::from_le_bytes(len8);
     if header_len > 512 << 20 {
-        return err(format!("{}: implausible safetensors header ({header_len} bytes)", path.display()));
+        return err(format!(
+            "{}: implausible safetensors header ({header_len} bytes)",
+            path.display()
+        ));
     }
     let mut hb = vec![0u8; header_len as usize];
     f.seek(SeekFrom::Start(8))?;
     f.read_exact(&mut hb)?;
     let text = String::from_utf8_lossy(&hb).into_owned();
-    let j = json::parse(&text)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
+    let j = json::parse(&text).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: {e}", path.display()),
+        )
+    })?;
     let Some(obj) = j.as_obj() else {
-        return err(format!("{}: safetensors header is not an object", path.display()));
+        return err(format!(
+            "{}: safetensors header is not an object",
+            path.display()
+        ));
     };
 
     let data_start = 8 + header_len;
@@ -215,16 +252,25 @@ pub fn scan_safetensors(path: &Path) -> io::Result<Vec<ShardTensor>> {
         if name == "__metadata__" {
             continue;
         }
-        let (Some(dtype), Some(shape), Some(offs)) =
-            (v.get("dtype").and_then(|d| d.as_str()), v.get("shape").and_then(|s| s.as_arr()), v.get("data_offsets").and_then(|o| o.as_arr()))
-        else {
+        let (Some(dtype), Some(shape), Some(offs)) = (
+            v.get("dtype").and_then(|d| d.as_str()),
+            v.get("shape").and_then(|s| s.as_arr()),
+            v.get("data_offsets").and_then(|o| o.as_arr()),
+        ) else {
             return err(format!("{}: malformed entry for '{name}'", path.display()));
         };
         let shape: Vec<usize> = shape.iter().filter_map(|d| d.as_usize()).collect();
         if offs.len() != 2 {
-            return err(format!("{}: '{name}' has {} data_offsets, expected 2", path.display(), offs.len()));
+            return err(format!(
+                "{}: '{name}' has {} data_offsets, expected 2",
+                path.display(),
+                offs.len()
+            ));
         }
-        let (a, b) = (offs[0].as_usize().unwrap_or(0) as u64, offs[1].as_usize().unwrap_or(0) as u64);
+        let (a, b) = (
+            offs[0].as_usize().unwrap_or(0) as u64,
+            offs[1].as_usize().unwrap_or(0) as u64,
+        );
         out.push(ShardTensor {
             name: name.clone(),
             dtype: dtype.to_string(),
@@ -244,7 +290,12 @@ pub fn scan_safetensors(path: &Path) -> io::Result<Vec<ShardTensor>> {
 pub fn scan_pth(path: &Path) -> io::Result<Vec<ShardTensor>> {
     let path_s = path.to_string_lossy().into_owned();
     let mut zip = ZipArchive::open(&path_s)?;
-    let Some(pkl_name) = zip.names().iter().find(|n| n.ends_with("data.pkl")).cloned() else {
+    let Some(pkl_name) = zip
+        .names()
+        .iter()
+        .find(|n| n.ends_with("data.pkl"))
+        .cloned()
+    else {
         return err(format!(
             "{}: no data.pkl — legacy (pre-1.6) torch files are not supported",
             path.display()
@@ -256,9 +307,10 @@ pub fn scan_pth(path: &Path) -> io::Result<Vec<ShardTensor>> {
     // Some checkpoints wrap the tensors in {"state_dict": {...}}.
     let entries = match &obj {
         Value::Dict(d) => {
-            let inner = d.borrow().iter().find_map(|(k, v)| {
-                matches!(k.as_str(), Some("state_dict")).then(|| v.clone())
-            });
+            let inner = d
+                .borrow()
+                .iter()
+                .find_map(|(k, v)| matches!(k.as_str(), Some("state_dict")).then(|| v.clone()));
             match inner {
                 Some(Value::Dict(d2)) => d2,
                 _ => d.clone(),
@@ -277,26 +329,58 @@ pub fn scan_pth(path: &Path) -> io::Result<Vec<ShardTensor>> {
         let args = &rc.2;
 
         let Value::PersId(pid) = &args[0] else {
-            return err(format!("{}: '{name}' has no storage record", path.display()));
+            return err(format!(
+                "{}: '{name}' has no storage record",
+                path.display()
+            ));
         };
         let items = pid.as_seq().unwrap_or_default();
         if items.len() < 3 {
-            return err(format!("{}: '{name}' has a malformed storage record", path.display()));
+            return err(format!(
+                "{}: '{name}' has a malformed storage record",
+                path.display()
+            ));
         }
         let Value::Global(g) = &items[1] else {
-            return err(format!("{}: '{name}' storage class is not a global", path.display()));
+            return err(format!(
+                "{}: '{name}' storage class is not a global",
+                path.display()
+            ));
         };
-        let dtype = safetensors_dtype_for_storage(&g.1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("{}: '{name}' has unsupported storage {}", path.display(), g.1)))?;
+        let dtype = safetensors_dtype_for_storage(&g.1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{}: '{name}' has unsupported storage {}",
+                    path.display(),
+                    g.1
+                ),
+            )
+        })?;
         let key = match &items[2] {
             Value::Str(s) => s.as_str().to_string(),
             Value::Int(i) => i.to_string(),
-            _ => return err(format!("{}: '{name}' has a non-scalar storage key", path.display())),
+            _ => {
+                return err(format!(
+                    "{}: '{name}' has a non-scalar storage key",
+                    path.display()
+                ))
+            }
         };
 
         let storage_offset = args[1].as_usize().unwrap_or(0);
-        let shape: Vec<usize> = args[2].as_seq().unwrap_or_default().iter().filter_map(|d| d.as_usize()).collect();
-        let stride: Vec<usize> = args[3].as_seq().unwrap_or_default().iter().filter_map(|d| d.as_usize()).collect();
+        let shape: Vec<usize> = args[2]
+            .as_seq()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|d| d.as_usize())
+            .collect();
+        let stride: Vec<usize> = args[3]
+            .as_seq()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|d| d.as_usize())
+            .collect();
 
         let expect = crate::pickle_write::contiguous_stride(&shape);
         let numel: usize = shape.iter().product();
@@ -313,7 +397,10 @@ pub fn scan_pth(path: &Path) -> io::Result<Vec<ShardTensor>> {
         let want = (numel * esz) as u64;
         let start = (storage_offset * esz) as u64;
         if start + want > rec_len {
-            return err(format!("{}: '{name}' reads past the end of its storage record", path.display()));
+            return err(format!(
+                "{}: '{name}' reads past the end of its storage record",
+                path.display()
+            ));
         }
         out.push(ShardTensor {
             name: name.to_string(),
@@ -371,12 +458,18 @@ pub fn export_text_state(tensors: Vec<ShardTensor>) -> io::Result<Filtered> {
             continue;
         }
         if !seen.insert(stripped.clone()) {
-            return err(format!("duplicate exported key after prefix stripping: {stripped}"));
+            return err(format!(
+                "duplicate exported key after prefix stripping: {stripped}"
+            ));
         }
         t.name = stripped;
         kept.push(t);
     }
-    Ok(Filtered { kept, skipped_vision, skipped_mtp })
+    Ok(Filtered {
+        kept,
+        skipped_vision,
+        skipped_mtp,
+    })
 }
 
 #[cfg(test)]
@@ -392,8 +485,14 @@ mod tests {
         // "visualise" must not be caught: the prefixes all end in a dot.
         assert!(!is_vision_key("visualiser.weight"));
 
-        assert_eq!(strip_language_model_prefix("model.language_model.layers.0.x"), "layers.0.x");
-        assert_eq!(strip_language_model_prefix("model.layers.0.x"), "model.layers.0.x");
+        assert_eq!(
+            strip_language_model_prefix("model.language_model.layers.0.x"),
+            "layers.0.x"
+        );
+        assert_eq!(
+            strip_language_model_prefix("model.layers.0.x"),
+            "model.layers.0.x"
+        );
 
         assert!(is_mtp_key("mtp.layers.0.weight"));
         assert!(!is_mtp_key("model.mtp.weight"));
@@ -428,7 +527,10 @@ mod tests {
     #[test]
     fn export_rejects_collisions_created_by_stripping() {
         let e = export_text_state(vec![t("model.language_model.layers.0.w"), t("layers.0.w")]);
-        assert!(e.is_err(), "a stripped key colliding with an existing one must be an error");
+        assert!(
+            e.is_err(),
+            "a stripped key colliding with an existing one must be an error"
+        );
     }
 }
 
@@ -445,7 +547,10 @@ pub struct ShardReader {
 
 impl ShardReader {
     pub fn new() -> Self {
-        ShardReader { path: PathBuf::new(), file: None }
+        ShardReader {
+            path: PathBuf::new(),
+            file: None,
+        }
     }
 
     fn for_path(&mut self, p: &Path) -> io::Result<&mut std::fs::File> {
@@ -475,7 +580,10 @@ pub fn write_pth(out: &str, kept: &[ShardTensor], reader: &mut ShardReader) -> i
     let mut refs = Vec::with_capacity(kept.len());
     for (i, t) in kept.iter().enumerate() {
         let Some(storage_class) = pickle_write::storage_class_for(&t.dtype) else {
-            return err(format!("{}: dtype {} has no torch storage class", t.name, t.dtype));
+            return err(format!(
+                "{}: dtype {} has no torch storage class",
+                t.name, t.dtype
+            ));
         };
         refs.push(TensorRef {
             name: &t.name,
@@ -502,7 +610,11 @@ pub fn write_pth(out: &str, kept: &[ShardTensor], reader: &mut ShardReader) -> i
 }
 
 /// Same, in safetensors format.
-pub fn write_safetensors(out: &str, kept: &[ShardTensor], reader: &mut ShardReader) -> io::Result<()> {
+pub fn write_safetensors(
+    out: &str,
+    kept: &[ShardTensor],
+    reader: &mut ShardReader,
+) -> io::Result<()> {
     let mut header = String::from("{");
     let mut off: u64 = 0;
     for (i, t) in kept.iter().enumerate() {
@@ -513,7 +625,11 @@ pub fn write_safetensors(out: &str, kept: &[ShardTensor], reader: &mut ShardRead
         header.push_str(&format!(
             ":{{\"dtype\":\"{}\",\"shape\":[{}],\"data_offsets\":[{},{}]}}",
             t.dtype,
-            t.shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(","),
+            t.shape
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
             off,
             off + t.nbytes
         ));

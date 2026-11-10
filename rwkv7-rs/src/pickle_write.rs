@@ -208,15 +208,29 @@ mod tests {
             numel: 6,
         }]);
         let v = pickle::load(&stream).expect("our reader should accept what we emit");
-        let Value::Dict(d) = &v else { panic!("expected a dict") };
+        let Value::Dict(d) = &v else {
+            panic!("expected a dict")
+        };
         let d = d.borrow();
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].0.as_str(), Some("model.layers.0.weight"));
-        let Value::Reduce(rc) = &d[0].1 else { panic!("expected a reduce node") };
+        let Value::Reduce(rc) = &d[0].1 else {
+            panic!("expected a reduce node")
+        };
         assert_eq!(rc.1, "_rebuild_tensor_v2");
         assert_eq!(rc.2[1].as_usize(), Some(0));
-        let size: Vec<usize> = rc.2[2].as_seq().unwrap().iter().filter_map(|v| v.as_usize()).collect();
-        let stride: Vec<usize> = rc.2[3].as_seq().unwrap().iter().filter_map(|v| v.as_usize()).collect();
+        let size: Vec<usize> = rc.2[2]
+            .as_seq()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_usize())
+            .collect();
+        let stride: Vec<usize> = rc.2[3]
+            .as_seq()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_usize())
+            .collect();
         assert_eq!(size, vec![2, 3]);
         assert_eq!(stride, vec![3, 1]);
     }

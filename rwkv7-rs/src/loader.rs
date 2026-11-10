@@ -241,7 +241,10 @@ fn load_pth(path: &str) -> io::Result<Tensors> {
             continue;
         }
         if args.len() < 4 {
-            return err(format!("{name}: unexpected _rebuild_tensor arity {}", args.len()));
+            return err(format!(
+                "{name}: unexpected _rebuild_tensor arity {}",
+                args.len()
+            ));
         }
 
         let storage = match parse_storage(&args[0]) {
@@ -262,7 +265,11 @@ fn load_pth(path: &str) -> io::Result<Tensors> {
             .filter_map(|d| d.as_usize())
             .collect();
 
-        let numel: usize = shape.iter().product::<usize>().max(if shape.is_empty() { 1 } else { 0 });
+        let numel: usize =
+            shape
+                .iter()
+                .product::<usize>()
+                .max(if shape.is_empty() { 1 } else { 0 });
 
         // Only contiguous views are supported; checkpoint weights always are.
         let mut expect = vec![0usize; shape.len()];
@@ -282,7 +289,13 @@ fn load_pth(path: &str) -> io::Result<Tensors> {
         let mut raw = vec![0u8; numel * storage.dtype.size()];
         zip.read_range(&record, byte_off, &mut raw)?;
 
-        out.insert(name.to_string(), Tensor { shape, data: decode(&raw, storage.dtype) });
+        out.insert(
+            name.to_string(),
+            Tensor {
+                shape,
+                data: decode(&raw, storage.dtype),
+            },
+        );
     }
 
     if out.is_empty() {
@@ -354,7 +367,8 @@ fn load_safetensors(path: &str) -> io::Result<Tensors> {
             let c = rest.find(':')? + 1;
             Some(rest[c..].trim_start().to_string())
         };
-        let (Some(dt), Some(sh), Some(off)) = (field("dtype"), field("shape"), field("data_offsets"))
+        let (Some(dt), Some(sh), Some(off)) =
+            (field("dtype"), field("shape"), field("data_offsets"))
         else {
             continue;
         };
@@ -379,7 +393,13 @@ fn load_safetensors(path: &str) -> io::Result<Tensors> {
         let mut raw = vec![0u8; offs[1] - offs[0]];
         f.seek(SeekFrom::Start(8 + header_len as u64 + offs[0] as u64))?;
         f.read_exact(&mut raw)?;
-        out.insert(key.to_string(), Tensor { shape, data: decode(&raw, dtype) });
+        out.insert(
+            key.to_string(),
+            Tensor {
+                shape,
+                data: decode(&raw, dtype),
+            },
+        );
     }
 
     if out.is_empty() {
@@ -402,10 +422,10 @@ mod tests {
             (0xbc00, -1.0),
             (0x4000, 2.0),
             (0x3555, 0.333_251_95),
-            (0x0400, 6.103_515_6e-5),  // smallest normal
-            (0x0001, 5.960_464_5e-8),  // smallest subnormal
-            (0x03ff, 6.097_555_2e-5),  // largest subnormal
-            (0x7bff, 65504.0),         // largest finite
+            (0x0400, 6.103_515_6e-5), // smallest normal
+            (0x0001, 5.960_464_5e-8), // smallest subnormal
+            (0x03ff, 6.097_555_2e-5), // largest subnormal
+            (0x7bff, 65504.0),        // largest finite
         ] {
             let got = f16_to_f32(bits);
             assert!(

@@ -113,7 +113,8 @@ impl<'a> Reader<'a> {
         }
         let s = &self.b[start..self.p];
         self.p += 1;
-        std::str::from_utf8(s).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad utf-8 in pickle"))
+        std::str::from_utf8(s)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad utf-8 in pickle"))
     }
 }
 
@@ -145,19 +146,37 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
     loop {
         let op = r.u8()?;
         match op {
-            b'\x80' => { r.u8()?; }                       // PROTO
-            b'\x95' => { r.u64()?; }                      // FRAME
-            b'.' => return Ok(pop!()),                    // STOP
+            b'\x80' => {
+                r.u8()?;
+            } // PROTO
+            b'\x95' => {
+                r.u64()?;
+            } // FRAME
+            b'.' => return Ok(pop!()), // STOP
 
             b'N' => stack.push(Value::None),
-            b'\x88' => stack.push(Value::Bool(true)),     // NEWTRUE
-            b'\x89' => stack.push(Value::Bool(false)),    // NEWFALSE
+            b'\x88' => stack.push(Value::Bool(true)), // NEWTRUE
+            b'\x89' => stack.push(Value::Bool(false)), // NEWFALSE
 
-            b'K' => { let v = r.u8()? as i64; stack.push(Value::Int(v)); }        // BININT1
-            b'M' => { let v = r.u16()? as i64; stack.push(Value::Int(v)); }       // BININT2
-            b'J' => { let v = r.i32()? as i64; stack.push(Value::Int(v)); }       // BININT
-            b'\x8a' | b'\x8b' => {                                                // LONG1 / LONG4
-                let n = if op == b'\x8a' { r.u8()? as usize } else { r.u32()? as usize };
+            b'K' => {
+                let v = r.u8()? as i64;
+                stack.push(Value::Int(v));
+            } // BININT1
+            b'M' => {
+                let v = r.u16()? as i64;
+                stack.push(Value::Int(v));
+            } // BININT2
+            b'J' => {
+                let v = r.i32()? as i64;
+                stack.push(Value::Int(v));
+            } // BININT
+            b'\x8a' | b'\x8b' => {
+                // LONG1 / LONG4
+                let n = if op == b'\x8a' {
+                    r.u8()? as usize
+                } else {
+                    r.u32()? as usize
+                };
                 let raw = r.take(n)?;
                 // Little-endian two's complement of arbitrary width; sign-extend into i64.
                 let mut acc: i128 = 0;
@@ -169,13 +188,15 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 }
                 stack.push(Value::Int(acc as i64));
             }
-            b'G' => {                                                             // BINFLOAT (big-endian)
+            b'G' => {
+                // BINFLOAT (big-endian)
                 let s = r.take(8)?;
                 let mut a = [0u8; 8];
                 a.copy_from_slice(s);
                 stack.push(Value::Float(f64::from_be_bytes(a)));
             }
-            b'I' | b'L' => {                                                      // INT / LONG (text)
+            b'I' | b'L' => {
+                // INT / LONG (text)
                 let s = r.line()?.trim_end_matches('L');
                 match s {
                     "01" => stack.push(Value::Bool(true)),
@@ -184,7 +205,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 }
             }
 
-            b'X' | b'\x8c' | b'\x8d' => {                                         // BINUNICODE / SHORT / 8
+            b'X' | b'\x8c' | b'\x8d' => {
+                // BINUNICODE / SHORT / 8
                 let n = match op {
                     b'X' => r.u32()? as usize,
                     b'\x8c' => r.u8()? as usize,
@@ -193,7 +215,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 let s = String::from_utf8_lossy(r.take(n)?).into_owned();
                 stack.push(Value::Str(Rc::new(s)));
             }
-            b'B' | b'C' | b'\x8e' => {                                            // BINBYTES / SHORT / 8
+            b'B' | b'C' | b'\x8e' => {
+                // BINBYTES / SHORT / 8
                 let n = match op {
                     b'B' => r.u32()? as usize,
                     b'C' => r.u8()? as usize,
@@ -201,37 +224,49 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 };
                 stack.push(Value::Bytes(Rc::new(r.take(n)?.to_vec())));
             }
-            b'T' | b'U' => {                                                      // BINSTRING / SHORT
-                let n = if op == b'T' { r.u32()? as usize } else { r.u8()? as usize };
+            b'T' | b'U' => {
+                // BINSTRING / SHORT
+                let n = if op == b'T' {
+                    r.u32()? as usize
+                } else {
+                    r.u8()? as usize
+                };
                 let s = String::from_utf8_lossy(r.take(n)?).into_owned();
                 stack.push(Value::Str(Rc::new(s)));
             }
 
-            b'(' => { marks.push(stack.len()); stack.push(Value::Mark); }         // MARK
-            b')' => stack.push(Value::Tuple(Rc::new(Vec::new()))),                // EMPTY_TUPLE
-            b'}' => stack.push(Value::Dict(Rc::new(RefCell::new(Vec::new())))),   // EMPTY_DICT
-            b']' => stack.push(Value::List(Rc::new(RefCell::new(Vec::new())))),   // EMPTY_LIST
-            b'\x8f' => stack.push(Value::List(Rc::new(RefCell::new(Vec::new())))),// EMPTY_SET
+            b'(' => {
+                marks.push(stack.len());
+                stack.push(Value::Mark);
+            } // MARK
+            b')' => stack.push(Value::Tuple(Rc::new(Vec::new()))), // EMPTY_TUPLE
+            b'}' => stack.push(Value::Dict(Rc::new(RefCell::new(Vec::new())))), // EMPTY_DICT
+            b']' => stack.push(Value::List(Rc::new(RefCell::new(Vec::new())))), // EMPTY_LIST
+            b'\x8f' => stack.push(Value::List(Rc::new(RefCell::new(Vec::new())))), // EMPTY_SET
 
-            b'\x85' | b'\x86' | b'\x87' => {                                      // TUPLE1/2/3
+            b'\x85' | b'\x86' | b'\x87' => {
+                // TUPLE1/2/3
                 let n = (op - b'\x84') as usize;
                 let at = stack.len() - n;
                 let items: Vec<Value> = stack.drain(at..).collect();
                 stack.push(Value::Tuple(Rc::new(items)));
             }
-            b't' => {                                                             // TUPLE
+            b't' => {
+                // TUPLE
                 let m = last_mark!();
                 let items: Vec<Value> = stack.drain(m + 1..).collect();
-                stack.pop();                                                      // the Mark
+                stack.pop(); // the Mark
                 stack.push(Value::Tuple(Rc::new(items)));
             }
-            b'l' => {                                                             // LIST
+            b'l' => {
+                // LIST
                 let m = last_mark!();
                 let items: Vec<Value> = stack.drain(m + 1..).collect();
                 stack.pop();
                 stack.push(Value::List(Rc::new(RefCell::new(items))));
             }
-            b'd' => {                                                             // DICT
+            b'd' => {
+                // DICT
                 let m = last_mark!();
                 let items: Vec<Value> = stack.drain(m + 1..).collect();
                 stack.pop();
@@ -242,14 +277,16 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 stack.push(Value::Dict(Rc::new(RefCell::new(d))));
             }
 
-            b'a' => {                                                             // APPEND
+            b'a' => {
+                // APPEND
                 let v = pop!();
                 match stack.last() {
                     Some(Value::List(l)) => l.borrow_mut().push(v),
                     _ => return err("APPEND on non-list"),
                 }
             }
-            b'e' => {                                                             // APPENDS
+            b'e' => {
+                // APPENDS
                 let m = last_mark!();
                 let items: Vec<Value> = stack.drain(m + 1..).collect();
                 stack.pop();
@@ -264,7 +301,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                     _ => return err("APPENDS on non-list"),
                 }
             }
-            b's' => {                                                             // SETITEM
+            b's' => {
+                // SETITEM
                 let v = pop!();
                 let k = pop!();
                 match stack.last() {
@@ -272,7 +310,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                     _ => return err("SETITEM on non-dict"),
                 }
             }
-            b'u' => {                                                             // SETITEMS
+            b'u' => {
+                // SETITEMS
                 let m = last_mark!();
                 let items: Vec<Value> = stack.drain(m + 1..).collect();
                 stack.pop();
@@ -286,19 +325,22 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 }
             }
 
-            b'q' | b'r' => {                                                      // BINPUT / LONG_BINPUT
+            b'q' | b'r' => {
+                // BINPUT / LONG_BINPUT
                 let i = if op == b'q' { r.u8()? as u32 } else { r.u32()? };
                 if let Some(v) = stack.last() {
                     memo.insert(i, v.clone());
                 }
             }
-            b'\x94' => {                                                          // MEMOIZE
+            b'\x94' => {
+                // MEMOIZE
                 let i = memo.len() as u32;
                 if let Some(v) = stack.last() {
                     memo.insert(i, v.clone());
                 }
             }
-            b'h' | b'j' => {                                                      // BINGET / LONG_BINGET
+            b'h' | b'j' => {
+                // BINGET / LONG_BINGET
                 let i = if op == b'h' { r.u8()? as u32 } else { r.u32()? };
                 match memo.get(&i) {
                     Some(v) => stack.push(v.clone()),
@@ -306,12 +348,14 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 }
             }
 
-            b'c' => {                                                             // GLOBAL
+            b'c' => {
+                // GLOBAL
                 let module = r.line()?.to_string();
                 let name = r.line()?.to_string();
                 stack.push(Value::Global(Rc::new((module, name))));
             }
-            b'\x93' => {                                                          // STACK_GLOBAL
+            b'\x93' => {
+                // STACK_GLOBAL
                 let name = pop!();
                 let module = pop!();
                 let (Some(m), Some(n)) = (module.as_str(), name.as_str()) else {
@@ -319,7 +363,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 };
                 stack.push(Value::Global(Rc::new((m.to_string(), n.to_string()))));
             }
-            b'R' | b'\x81' => {                                                   // REDUCE / NEWOBJ
+            b'R' | b'\x81' => {
+                // REDUCE / NEWOBJ
                 let args = pop!();
                 let callable = pop!();
                 let Value::Global(g) = callable else {
@@ -334,7 +379,8 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                     stack.push(Value::Reduce(Rc::new((g.0.clone(), g.1.clone(), args))));
                 }
             }
-            b'b' => {                                                             // BUILD
+            b'b' => {
+                // BUILD
                 let state = pop!();
                 let obj = pop!();
                 // Merge __setstate__ payloads into dict-like objects; otherwise ignore.
@@ -343,21 +389,27 @@ pub fn load(data: &[u8]) -> io::Result<Value> {
                 }
                 stack.push(obj);
             }
-            b'Q' => {                                                             // BINPERSID
+            b'Q' => {
+                // BINPERSID
                 let arg = pop!();
                 stack.push(Value::PersId(Rc::new(arg)));
             }
-            b'P' => {                                                             // PERSID
+            b'P' => {
+                // PERSID
                 let s = r.line()?.to_string();
                 stack.push(Value::PersId(Rc::new(Value::Str(Rc::new(s)))));
             }
 
-            b'0' => { stack.pop(); }                                              // POP
-            b'1' => {                                                             // POP_MARK
+            b'0' => {
+                stack.pop();
+            } // POP
+            b'1' => {
+                // POP_MARK
                 let m = last_mark!();
                 stack.truncate(m);
             }
-            b'2' => {                                                             // DUP
+            b'2' => {
+                // DUP
                 if let Some(v) = stack.last().cloned() {
                     stack.push(v);
                 }

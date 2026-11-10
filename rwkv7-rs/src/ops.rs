@@ -132,7 +132,14 @@ pub fn layer_norm(x: &[f32], w: &[f32], b: &[f32], eps: f32, out: &mut [f32]) {
     let n = x.len();
     let inv_n = 1.0 / n as f32;
     let mean = x.iter().sum::<f32>() * inv_n;
-    let var = x.iter().map(|v| { let d = v - mean; d * d }).sum::<f32>() * inv_n;
+    let var = x
+        .iter()
+        .map(|v| {
+            let d = v - mean;
+            d * d
+        })
+        .sum::<f32>()
+        * inv_n;
     let scale = 1.0 / (var + eps).sqrt();
     for i in 0..n {
         out[i] = (x[i] - mean) * scale * w[i] + b[i];
@@ -141,13 +148,27 @@ pub fn layer_norm(x: &[f32], w: &[f32], b: &[f32], eps: f32, out: &mut [f32]) {
 
 /// GroupNorm with one group per head, i.e. normalise each contiguous run of
 /// `head_size` elements independently. RWKV-7 uses eps = 64e-5, not the usual 1e-5.
-pub fn group_norm_heads(x: &mut [f32], n_head: usize, head_size: usize, w: &[f32], b: &[f32], eps: f32) {
+pub fn group_norm_heads(
+    x: &mut [f32],
+    n_head: usize,
+    head_size: usize,
+    w: &[f32],
+    b: &[f32],
+    eps: f32,
+) {
     let inv_n = 1.0 / head_size as f32;
     for h in 0..n_head {
         let s = h * head_size;
         let seg = &mut x[s..s + head_size];
         let mean = seg.iter().sum::<f32>() * inv_n;
-        let var = seg.iter().map(|v| { let d = v - mean; d * d }).sum::<f32>() * inv_n;
+        let var = seg
+            .iter()
+            .map(|v| {
+                let d = v - mean;
+                d * d
+            })
+            .sum::<f32>()
+            * inv_n;
         let scale = 1.0 / (var + eps).sqrt();
         for i in 0..head_size {
             seg[i] = (seg[i] - mean) * scale * w[s + i] + b[s + i];

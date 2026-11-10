@@ -100,13 +100,25 @@ impl<'a> Parser<'a> {
             b'[' => self.array(),
             b'"' => Ok(Json::Str(self.string()?)),
             b't' => {
-                if self.lit("true") { Ok(Json::Bool(true)) } else { Err(self.bad()) }
+                if self.lit("true") {
+                    Ok(Json::Bool(true))
+                } else {
+                    Err(self.bad())
+                }
             }
             b'f' => {
-                if self.lit("false") { Ok(Json::Bool(false)) } else { Err(self.bad()) }
+                if self.lit("false") {
+                    Ok(Json::Bool(false))
+                } else {
+                    Err(self.bad())
+                }
             }
             b'n' => {
-                if self.lit("null") { Ok(Json::Null) } else { Err(self.bad()) }
+                if self.lit("null") {
+                    Ok(Json::Null)
+                } else {
+                    Err(self.bad())
+                }
             }
             _ => self.number(),
         }
@@ -194,7 +206,9 @@ impl<'a> Parser<'a> {
                             let hi = self.hex4()?;
                             // Surrogate pair: the low half follows as a second \u escape.
                             let cp = if (0xD800..0xDC00).contains(&hi) {
-                                if self.b.get(self.i) == Some(&b'\\') && self.b.get(self.i + 1) == Some(&b'u') {
+                                if self.b.get(self.i) == Some(&b'\\')
+                                    && self.b.get(self.i + 1) == Some(&b'u')
+                                {
                                     self.i += 2;
                                     let lo = self.hex4()?;
                                     0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
@@ -212,7 +226,8 @@ impl<'a> Parser<'a> {
                 _ => {
                     // Copy the raw UTF-8 byte run; JSON strings are already UTF-8.
                     let start = self.i - 1;
-                    while self.i < self.b.len() && self.b[self.i] != b'"' && self.b[self.i] != b'\\' {
+                    while self.i < self.b.len() && self.b[self.i] != b'"' && self.b[self.i] != b'\\'
+                    {
                         self.i += 1;
                     }
                     out.push_str(&String::from_utf8_lossy(&self.b[start..self.i]));
@@ -236,7 +251,10 @@ impl<'a> Parser<'a> {
             self.i += 1;
         }
         while self.i < self.b.len()
-            && matches!(self.b[self.i], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-')
+            && matches!(
+                self.b[self.i],
+                b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+            )
         {
             self.i += 1;
         }
@@ -341,7 +359,14 @@ mod tests {
                       "weight_map":{"model.layers.0.mlp.gate_proj.weight":"model-00001-of-00002.safetensors",
                                     "lm_head.weight":"model-00002-of-00002.safetensors"}}"#;
         let j = parse(src).unwrap();
-        assert_eq!(j.get("metadata").unwrap().get("total_size").unwrap().as_usize(), Some(1234));
+        assert_eq!(
+            j.get("metadata")
+                .unwrap()
+                .get("total_size")
+                .unwrap()
+                .as_usize(),
+            Some(1234)
+        );
         let wm = j.get("weight_map").unwrap().as_obj().unwrap();
         assert_eq!(wm.len(), 2);
         assert_eq!(wm[0].1.as_str(), Some("model-00001-of-00002.safetensors"));
@@ -366,7 +391,13 @@ mod tests {
 
     #[test]
     fn rejects_malformed() {
-        for bad in [r#"{"a":}"#, r#"{"a" 1}"#, "[1,2", r#""unterminated"#, "{} junk"] {
+        for bad in [
+            r#"{"a":}"#,
+            r#"{"a" 1}"#,
+            "[1,2",
+            r#""unterminated"#,
+            "{} junk",
+        ] {
             assert!(parse(bad).is_err(), "should have rejected {bad:?}");
         }
     }
@@ -378,19 +409,30 @@ mod tests {
         m.insert("a".into(), Out::Str("hi\n".into()));
         m.insert("cfg".into(), Out::Raw("{\"k\": 1}".into()));
         let s = Out::Obj(m).to_string_pretty();
-        assert_eq!(s, "{\n  \"a\": \"hi\\n\",\n  \"cfg\": {\"k\": 1},\n  \"z\": 1\n}");
+        assert_eq!(
+            s,
+            "{\n  \"a\": \"hi\\n\",\n  \"cfg\": {\"k\": 1},\n  \"z\": 1\n}"
+        );
     }
 
     #[test]
     fn raw_multiline_is_reindented() {
         let mut m = BTreeMap::new();
-        m.insert("config".into(), Out::Raw("{\n  \"a\": 1,\n  \"b\": {\n    \"c\": 2\n  }\n}".into()));
+        m.insert(
+            "config".into(),
+            Out::Raw("{\n  \"a\": 1,\n  \"b\": {\n    \"c\": 2\n  }\n}".into()),
+        );
         let s = Out::Obj(m).to_string_pretty();
         // Every spliced line must sit at or below its key's indent level.
         for line in s.lines().skip(1) {
-            if line.starts_with('}') { continue; }
+            if line.starts_with('}') {
+                continue;
+            }
             assert!(line.starts_with("  "), "under-indented line: {line:?}");
         }
-        assert!(s.contains("\n      \"c\": 2"), "nested value not re-indented:\n{s}");
+        assert!(
+            s.contains("\n      \"c\": 2"),
+            "nested value not re-indented:\n{s}"
+        );
     }
 }

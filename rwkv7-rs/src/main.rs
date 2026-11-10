@@ -12,131 +12,14 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use model::Model;
-use sampler::{SampleOpts, Rng};
+use rwkv7::cli::inference::{self, Args, Input};
+use sampler::Rng;
 use tokenizer::Tokenizer;
-
-const DEFAULT_PROMPT: &str = "User: simulate SpaceX mars landing using python\n\nAssistant: <think";
-
-struct Args {
-    model: String,
-    vocab: Option<String>,
-    prompt: String,
-    length: usize,
-    temperature: f32,
-    top_p: f32,
-    top_k: usize,
-    seed: u64,
-    threads: usize,
-    chunk: usize,
-    show_top: usize,
-    tokens: Option<Vec<u32>>,
-    dump_logits: Option<String>,
-    encode_only: bool,
-}
-
-const USAGE: &str = "\
-rwkv7 — RWKV-7 \"Goose\" x070 inference in Rust
-
-USAGE:
-    rwkv7 --model <FILE> [OPTIONS]
-
-OPTIONS:
-    -m, --model <FILE>       Checkpoint: .pth (torch.save) or .safetensors  [required]
-        --vocab <FILE>       Tokenizer vocab  [default: rwkv_vocab_v20230424.txt, searched
-                             next to the model, in the CWD, and one level up]
-    -p, --prompt <TEXT>      Prompt to condition on
-        --prompt-file <F>    Read the prompt from a file instead
-    -n, --length <N>         Tokens to generate  [default: 500]
-    -t, --temperature <F>    Sampling temperature  [default: 1.0]
-        --top-p <F>          Nucleus sampling; 0 means greedy  [default: 0.0]
-        --top-k <N>          Top-k cutoff, 0 disables  [default: 0]
-        --seed <N>           RNG seed  [default: from the clock]
-        --threads <N>        Worker threads  [default: number of cores]
-        --chunk <N>          Prefill block size  [default: 256]
-        --show-top <N>       Print the N most likely continuations after prefill  [default: 10]
-        --tokens <IDS>       Use these comma-separated token ids as the prompt, bypassing
-                             the tokenizer (for testing against a reference implementation)
-        --encode-only        Print the prompt's token ids and exit
-        --dump-logits <F>    Write the post-prefill logits to F as raw little-endian f32
-    -h, --help               Show this help
-";
-
-fn parse_args() -> Result<Args, String> {
-    let mut a = Args {
-        model: String::new(),
-        vocab: None,
-        prompt: DEFAULT_PROMPT.to_string(),
-        length: 500,
-        temperature: 1.0,
-        top_p: 0.0,
-        top_k: 0,
-        seed: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0x5eed),
-        threads: 0,
-        chunk: 256,
-        show_top: 10,
-        tokens: None,
-        dump_logits: None,
-        encode_only: false,
-    };
-
-    let argv: Vec<String> = std::env::args().skip(1).collect();
-    let mut i = 0;
-    while i < argv.len() {
-        let k = argv[i].as_str();
-        let mut val = |name: &str| -> Result<String, String> {
-            i += 1;
-            argv.get(i).cloned().ok_or_else(|| format!("{name} needs a value"))
-        };
-        match k {
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                std::process::exit(0);
-            }
-            "-m" | "--model" => a.model = val(k)?,
-            "--vocab" => a.vocab = Some(val(k)?),
-            "-p" | "--prompt" => a.prompt = val(k)?,
-            "--prompt-file" => {
-                let f = val(k)?;
-                a.prompt = std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?;
-            }
-            "-n" | "--length" => a.length = val(k)?.parse().map_err(|_| "bad --length")?,
-            "-t" | "--temperature" => {
-                a.temperature = val(k)?.parse().map_err(|_| "bad --temperature")?
-            }
-            "--top-p" => a.top_p = val(k)?.parse().map_err(|_| "bad --top-p")?,
-            "--top-k" => a.top_k = val(k)?.parse().map_err(|_| "bad --top-k")?,
-            "--seed" => a.seed = val(k)?.parse().map_err(|_| "bad --seed")?,
-            "--threads" => a.threads = val(k)?.parse().map_err(|_| "bad --threads")?,
-            "--chunk" => a.chunk = val(k)?.parse::<usize>().map_err(|_| "bad --chunk")?.max(1),
-            "--show-top" => a.show_top = val(k)?.parse().map_err(|_| "bad --show-top")?,
-            "--tokens" => {
-                let raw = val(k)?;
-                let mut ids = Vec::new();
-                for t in raw.split(',').filter(|t| !t.trim().is_empty()) {
-                    ids.push(t.trim().parse::<u32>().map_err(|_| format!("bad token id '{t}'"))?);
-                }
-                a.tokens = Some(ids);
-            }
-            "--dump-logits" => a.dump_logits = Some(val(k)?),
-            "--encode-only" => a.encode_only = true,
-            other => return Err(format!("unknown argument '{other}'\n\n{USAGE}")),
-        }
-        i += 1;
-    }
-
-    if a.model.is_empty() && !a.encode_only {
-        return Err(format!("--model is required\n\n{USAGE}"));
-    }
-    Ok(a)
-}
 
 /// Look for the vocab file next to the model, then in the usual relative spots.
 fn find_vocab(explicit: &Option<String>, model_path: &str) -> Result<String, String> {
     if let Some(v) = explicit {
-        return if std::path::Path::new(v).exists() {
+        return if std::path::Path::new(v).is_file() {
             Ok(v.clone())
         } else {
             Err(format!("vocab file not found: {v}"))
@@ -160,7 +43,7 @@ fn find_vocab(explicit: &Option<String>, model_path: &str) -> Result<String, Str
         }
     }
     for c in &candidates {
-        if c.exists() {
+        if c.is_file() {
             return Ok(c.to_string_lossy().into_owned());
         }
     }
@@ -185,17 +68,26 @@ fn human_bytes(n: usize) -> String {
     format!("{v:.1} {}", U[i])
 }
 
-fn run() -> Result<(), String> {
-    let args = parse_args()?;
-    pool::set_threads(args.threads);
-    let threads = pool::pool().threads();
-
+fn run(args: Args) -> Result<(), String> {
+    let prompt = match &args.input {
+        Input::Text(text) => Some(text.clone()),
+        Input::File(path) => {
+            Some(std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?)
+        }
+        Input::Tokens(_) => None,
+    };
     // --encode-only never touches the model, so handle it before anything is loaded.
     if args.encode_only {
         let path = find_vocab(&args.vocab, &args.model)?;
         let tok = Tokenizer::from_file(&path).map_err(|e| format!("{path}: {e}"))?;
-        let ids = tok.encode(&args.prompt);
-        println!("{}", ids.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(","));
+        let ids = tok.encode(prompt.as_deref().unwrap_or_default());
+        println!(
+            "{}",
+            ids.iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
         return Ok(());
     }
 
@@ -207,13 +99,20 @@ fn run() -> Result<(), String> {
             Some(Tokenizer::from_file(&path).map_err(|e| format!("{path}: {e}"))?)
         }
         Err(e) => {
-            if args.tokens.is_none() {
+            if args.vocab.is_some() || !matches!(args.input, Input::Tokens(_)) {
                 return Err(e);
             }
             eprintln!("note: no tokenizer ({e}); running with --tokens only");
             None
         }
     };
+
+    if args.length > 0 && tok.is_none() {
+        return Err("generation needs a tokenizer; pass --vocab or use --length 0".into());
+    }
+
+    pool::set_threads(args.threads);
+    let threads = pool::pool().threads();
 
     eprintln!("loading model:     {}", args.model);
     let t0 = Instant::now();
@@ -233,19 +132,29 @@ fn run() -> Result<(), String> {
     );
     if let Some(t) = &tok {
         if c.vocab_size < t.vocab_size() {
-            eprintln!("  warning: model vocab {} < tokenizer vocab {}", c.vocab_size, t.vocab_size());
+            eprintln!(
+                "  warning: model vocab {} < tokenizer vocab {}",
+                c.vocab_size,
+                t.vocab_size()
+            );
         }
     }
 
-    let tokens = match &args.tokens {
-        Some(ids) => ids.clone(),
-        None => tok.as_ref().ok_or("no tokenizer available")?.encode(&args.prompt),
+    let tokens = match &args.input {
+        Input::Tokens(ids) => ids.clone(),
+        _ => tok
+            .as_ref()
+            .ok_or("no tokenizer available")?
+            .encode(prompt.as_deref().unwrap_or_default()),
     };
     if tokens.is_empty() {
         return Err("prompt encoded to zero tokens".into());
     }
     if let Some(bad) = tokens.iter().find(|t| **t as usize >= c.vocab_size) {
-        return Err(format!("token id {bad} is outside the model vocab ({})", c.vocab_size));
+        return Err(format!(
+            "token id {bad} is outside the model vocab ({})",
+            c.vocab_size
+        ));
     }
 
     // ---- prefill ---------------------------------------------------------
@@ -272,18 +181,8 @@ fn run() -> Result<(), String> {
         eprintln!("wrote {} logits to {path}", logits.len());
     }
 
-    if args.show_top > 0 && tok.is_some() {
-        let tok = tok.as_ref().unwrap();
-        let mut probs = Vec::new();
-        sampler::softmax(&logits, &mut probs);
-        eprintln!("most likely continuations:");
-        for id in sampler::top_indices(&probs, args.show_top) {
-            let s = tok
-                .decode(&[id])
-                .unwrap_or_else(|| format!("{:?}", tok.decode_bytes(&[id])));
-            eprintln!("  {:>7.2}%  {:?}", probs[id as usize] * 100.0, s);
-        }
-        eprintln!();
+    if let Some(tok) = &tok {
+        show_continuations(&logits, tok, args.show_top);
     }
 
     if args.length == 0 {
@@ -293,15 +192,48 @@ fn run() -> Result<(), String> {
         return Err("generation needs a tokenizer; pass --vocab or use --length 0".into());
     };
 
-    // ---- generate --------------------------------------------------------
-    print!("{}", args.prompt);
-    let _ = std::io::stdout().flush();
+    let prompt =
+        prompt.unwrap_or_else(|| String::from_utf8_lossy(&tok.decode_bytes(&tokens)).into_owned());
+    generate(
+        &model,
+        &mut state,
+        logits,
+        &tok,
+        &prompt,
+        &args,
+        &mut std::io::stdout().lock(),
+    )
+}
 
-    let opts = SampleOpts {
-        temperature: args.temperature,
-        top_p: args.top_p,
-        top_k: args.top_k,
-    };
+/// Report diagnostics on stderr so stdout remains usable as generated text.
+fn show_continuations(logits: &[f32], tok: &Tokenizer, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let mut probs = Vec::new();
+    sampler::softmax(logits, &mut probs);
+    eprintln!("most likely continuations:");
+    for id in sampler::top_indices(&probs, count) {
+        let text = tok
+            .decode(&[id])
+            .unwrap_or_else(|| format!("{:?}", tok.decode_bytes(&[id])));
+        eprintln!("  {:>7.2}%  {:?}", probs[id as usize] * 100.0, text);
+    }
+    eprintln!();
+}
+
+/// Stream decoded tokens, buffering incomplete UTF-8 sequences between steps.
+fn generate(
+    model: &Model,
+    state: &mut model::State,
+    mut logits: Vec<f32>,
+    tok: &Tokenizer,
+    prompt: &str,
+    args: &Args,
+    output: &mut impl Write,
+) -> Result<(), String> {
+    write!(output, "{prompt}").map_err(|e| e.to_string())?;
+    output.flush().map_err(|e| e.to_string())?;
     let mut rng = Rng::new(args.seed);
 
     // Tokens are byte sequences, so a multi-byte character can straddle two of
@@ -311,23 +243,29 @@ fn run() -> Result<(), String> {
     let t0 = Instant::now();
 
     for _ in 0..args.length {
-        let token = sampler::sample(&logits, &opts, &mut rng);
+        let token = sampler::sample(&logits, &args.sampling, &mut rng);
         if token == 0 {
             break; // endoftext
         }
         pending.push(token);
         if let Some(s) = tok.decode(&pending) {
-            print!("{s}");
-            let _ = std::io::stdout().flush();
+            write!(output, "{s}").map_err(|e| e.to_string())?;
+            output.flush().map_err(|e| e.to_string())?;
             pending.clear();
         }
-        model.forward_one(token, &mut state, &mut logits);
+        model.forward_one(token, state, &mut logits);
         generated += 1;
     }
     if !pending.is_empty() {
-        print!("{}", String::from_utf8_lossy(&tok.decode_bytes(&pending)));
+        write!(
+            output,
+            "{}",
+            String::from_utf8_lossy(&tok.decode_bytes(&pending))
+        )
+        .map_err(|e| e.to_string())?;
     }
-    println!();
+    writeln!(output).map_err(|e| e.to_string())?;
+    output.flush().map_err(|e| e.to_string())?;
 
     let dt = t0.elapsed().as_secs_f64();
     eprintln!(
@@ -338,7 +276,14 @@ fn run() -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
-    match run() {
+    let result = inference::parse(std::env::args().skip(1)).and_then(|args| match args {
+        Some(args) => run(args),
+        None => {
+            print!("{}", inference::USAGE);
+            Ok(())
+        }
+    });
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");

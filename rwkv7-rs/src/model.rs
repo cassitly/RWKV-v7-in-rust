@@ -146,9 +146,15 @@ fn mat2(t: &mut Tensors, name: &str, rows: usize, cols: usize) -> io::Result<Mat
         ));
     }
     if s.len() == 2 && (s[0] != rows || s[1] != cols) {
-        return err(format!("{name}: expected shape [{rows}, {cols}], found {s:?}"));
+        return err(format!(
+            "{name}: expected shape [{rows}, {cols}], found {s:?}"
+        ));
     }
-    Ok(Mat { rows, cols, data: x.data })
+    Ok(Mat {
+        rows,
+        cols,
+        data: x.data,
+    })
 }
 
 /// Load a LoRA factor pair `[n_embd, rank]` / `[rank, n_embd]`. The rank varies by
@@ -170,7 +176,9 @@ fn lora_pair(
     }
     let rank = first.data.len() / n_embd;
     if rank == 0 || rank > MAX_LORA {
-        return err(format!("{prefix}{lo}: implausible LoRA rank {rank} (max {MAX_LORA})"));
+        return err(format!(
+            "{prefix}{lo}: implausible LoRA rank {rank} (max {MAX_LORA})"
+        ));
     }
     let second = take(t, &format!("{prefix}{hi}"))?;
     if second.data.len() != rank * n_embd {
@@ -180,8 +188,16 @@ fn lora_pair(
         ));
     }
     Ok((
-        Mat { rows: n_embd, cols: rank, data: first.data },
-        Mat { rows: rank, cols: n_embd, data: second.data },
+        Mat {
+            rows: n_embd,
+            cols: rank,
+            data: first.data,
+        },
+        Mat {
+            rows: rank,
+            cols: n_embd,
+            data: second.data,
+        },
     ))
 }
 
@@ -189,7 +205,10 @@ impl Model {
     pub fn load(mut z: Tensors) -> io::Result<Model> {
         // ---- shape discovery -------------------------------------------------
         let emb = z.get("emb.weight").ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "checkpoint is missing 'emb.weight'")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "checkpoint is missing 'emb.weight'",
+            )
         })?;
         if emb.shape.len() != 2 {
             return err(format!("emb.weight should be 2-D, found {:?}", emb.shape));
@@ -206,7 +225,9 @@ impl Model {
         })?;
         let rs = r_k.squeezed_shape();
         if rs.len() != 2 {
-            return err(format!("blocks.0.att.r_k should be [n_head, head_size], found {rs:?}"));
+            return err(format!(
+                "blocks.0.att.r_k should be [n_head, head_size], found {rs:?}"
+            ));
         }
         let (n_head, head_size) = (rs[0], rs[1]);
         if n_head * head_size != n_embd {
@@ -223,11 +244,21 @@ impl Model {
         }
 
         let ffn = z.get("blocks.0.ffn.key.weight").ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "checkpoint is missing 'blocks.0.ffn.key.weight'")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "checkpoint is missing 'blocks.0.ffn.key.weight'",
+            )
         })?;
         let dim_ffn = ffn.data.len() / n_embd;
 
-        let cfg = Config { n_layer, n_embd, vocab_size, head_size, n_head, dim_ffn };
+        let cfg = Config {
+            n_layer,
+            n_embd,
+            vocab_size,
+            head_size,
+            n_head,
+            dim_ffn,
+        };
 
         // ---- fold ln0 into the embedding table -------------------------------
         let ln0_w = vec1(&mut z, "blocks.0.ln0.weight", n_embd)?;
@@ -241,7 +272,11 @@ impl Model {
                 emb[v * n_embd..(v + 1) * n_embd].copy_from_slice(&row);
             }
         }
-        let emb = Mat { rows: vocab_size, cols: n_embd, data: emb };
+        let emb = Mat {
+            rows: vocab_size,
+            cols: n_embd,
+            data: emb,
+        };
 
         // ---- per-layer weights -----------------------------------------------
         let mut layers = Vec::with_capacity(n_layer);
@@ -314,7 +349,14 @@ impl Model {
         let ln_out_b = vec1(&mut z, "ln_out.bias", n_embd)?;
         let head = mat2(&mut z, "head.weight", vocab_size, n_embd)?;
 
-        Ok(Model { cfg, emb, layers, ln_out_w, ln_out_b, head })
+        Ok(Model {
+            cfg,
+            emb,
+            layers,
+            ln_out_w,
+            ln_out_b,
+            head,
+        })
     }
 
     pub fn new_state(&self) -> State {
@@ -328,7 +370,8 @@ impl Model {
     pub fn forward_one(&self, token: u32, state: &mut State, logits: &mut Vec<f32>) {
         let c = &self.cfg;
 
-        let mut x = self.emb.data[token as usize * c.n_embd..(token as usize + 1) * c.n_embd].to_vec();
+        let mut x =
+            self.emb.data[token as usize * c.n_embd..(token as usize + 1) * c.n_embd].to_vec();
         let mut xx = vec![0.0f32; c.n_embd];
         let mut v_first = vec![0.0f32; c.n_embd];
 
@@ -466,7 +509,14 @@ impl Model {
         matvec(&l.o_w.data, c.n_embd, c.n_embd, &s.y, &mut s.out);
     }
 
-    fn channel_mix_one(&self, layer_id: usize, l: &Layer, x: &[f32], state: &mut State, s: &mut Scratch) {
+    fn channel_mix_one(
+        &self,
+        layer_id: usize,
+        l: &Layer,
+        x: &[f32],
+        state: &mut State,
+        s: &mut Scratch,
+    ) {
         let c = &self.cfg;
         let x_prev = &state.ffn_x[layer_id];
         for k in 0..c.n_embd {
@@ -502,7 +552,8 @@ impl Model {
         let mut x = vec![0.0f32; t * c.n_embd];
         for (i, tok) in tokens.iter().enumerate() {
             let src = *tok as usize * c.n_embd;
-            x[i * c.n_embd..(i + 1) * c.n_embd].copy_from_slice(&self.emb.data[src..src + c.n_embd]);
+            x[i * c.n_embd..(i + 1) * c.n_embd]
+                .copy_from_slice(&self.emb.data[src..src + c.n_embd]);
         }
 
         let mut sq = SeqScratch::new(c, t);
@@ -563,7 +614,11 @@ impl Model {
         for i in 0..t {
             let cur = &s.xx[i * e..(i + 1) * e];
             for k in 0..e {
-                let prev = if i == 0 { state.att_x[layer_id][k] } else { s.xx[(i - 1) * e + k] };
+                let prev = if i == 0 {
+                    state.att_x[layer_id][k]
+                } else {
+                    s.xx[(i - 1) * e + k]
+                };
                 let d = prev - cur[k];
                 s.xr[i * e + k] = cur[k] + d * l.x_r[k];
                 s.xw[i * e + k] = cur[k] + d * l.x_w[k];
@@ -674,13 +729,24 @@ impl Model {
         matmat(&l.o_w.data, e, e, &s.y, t, &mut s.out);
     }
 
-    fn channel_mix_seq(&self, layer_id: usize, l: &Layer, t: usize, state: &mut State, s: &mut SeqScratch) {
+    fn channel_mix_seq(
+        &self,
+        layer_id: usize,
+        l: &Layer,
+        t: usize,
+        state: &mut State,
+        s: &mut SeqScratch,
+    ) {
         let c = &self.cfg;
         let e = c.n_embd;
         for i in 0..t {
             let cur = &s.xx[i * e..(i + 1) * e];
             for k in 0..e {
-                let prev = if i == 0 { state.ffn_x[layer_id][k] } else { s.xx[(i - 1) * e + k] };
+                let prev = if i == 0 {
+                    state.ffn_x[layer_id][k]
+                } else {
+                    s.xx[(i - 1) * e + k]
+                };
                 s.xk[i * e + k] = cur[k] + (prev - cur[k]) * l.ffn_x_k[k];
             }
         }
@@ -725,7 +791,12 @@ fn wkv7_step(
     for h in 0..n_head {
         let base = h * n;
         let s = &mut state[h * n * n..(h + 1) * n * n];
-        let (rh, wh, kh, vh) = (&r[base..base + n], &w[base..base + n], &k[base..base + n], &v[base..base + n]);
+        let (rh, wh, kh, vh) = (
+            &r[base..base + n],
+            &w[base..base + n],
+            &k[base..base + n],
+            &v[base..base + n],
+        );
         let kkh = &kk[base..base + n];
         let ah = &a[base..base + n];
 
@@ -752,10 +823,27 @@ fn wkv7_step(
 
 /// Per-token scratch buffers.
 struct Scratch {
-    xr: Vec<f32>, xw: Vec<f32>, xk: Vec<f32>, xv: Vec<f32>, xa: Vec<f32>, xg: Vec<f32>,
-    r: Vec<f32>, w: Vec<f32>, k: Vec<f32>, v: Vec<f32>, a: Vec<f32>, g: Vec<f32>,
-    kk: Vec<f32>, y: Vec<f32>, out: Vec<f32>, ffn: Vec<f32>, vmix: Vec<f32>,
-    lora_w: Vec<f32>, lora_a: Vec<f32>, lora_g: Vec<f32>, lora_v: Vec<f32>,
+    xr: Vec<f32>,
+    xw: Vec<f32>,
+    xk: Vec<f32>,
+    xv: Vec<f32>,
+    xa: Vec<f32>,
+    xg: Vec<f32>,
+    r: Vec<f32>,
+    w: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    a: Vec<f32>,
+    g: Vec<f32>,
+    kk: Vec<f32>,
+    y: Vec<f32>,
+    out: Vec<f32>,
+    ffn: Vec<f32>,
+    vmix: Vec<f32>,
+    lora_w: Vec<f32>,
+    lora_a: Vec<f32>,
+    lora_g: Vec<f32>,
+    lora_v: Vec<f32>,
 }
 
 /// LoRA ranks differ per tensor; one buffer sized to the largest is simpler than
@@ -767,11 +855,27 @@ impl Scratch {
         let e = c.n_embd;
         let z = || vec![0.0f32; e];
         Scratch {
-            xr: z(), xw: z(), xk: z(), xv: z(), xa: z(), xg: z(),
-            r: z(), w: z(), k: z(), v: z(), a: z(), g: z(),
-            kk: z(), y: z(), out: z(), ffn: vec![0.0; c.dim_ffn], vmix: z(),
-            lora_w: vec![0.0; MAX_LORA], lora_a: vec![0.0; MAX_LORA],
-            lora_g: vec![0.0; MAX_LORA], lora_v: vec![0.0; MAX_LORA],
+            xr: z(),
+            xw: z(),
+            xk: z(),
+            xv: z(),
+            xa: z(),
+            xg: z(),
+            r: z(),
+            w: z(),
+            k: z(),
+            v: z(),
+            a: z(),
+            g: z(),
+            kk: z(),
+            y: z(),
+            out: z(),
+            ffn: vec![0.0; c.dim_ffn],
+            vmix: z(),
+            lora_w: vec![0.0; MAX_LORA],
+            lora_a: vec![0.0; MAX_LORA],
+            lora_g: vec![0.0; MAX_LORA],
+            lora_v: vec![0.0; MAX_LORA],
         }
     }
 }
@@ -779,10 +883,27 @@ impl Scratch {
 /// Same, sized for a T-token block.
 struct SeqScratch {
     xx: Vec<f32>,
-    xr: Vec<f32>, xw: Vec<f32>, xk: Vec<f32>, xv: Vec<f32>, xa: Vec<f32>, xg: Vec<f32>,
-    r: Vec<f32>, w: Vec<f32>, k: Vec<f32>, v: Vec<f32>, a: Vec<f32>, g: Vec<f32>,
-    kk: Vec<f32>, y: Vec<f32>, out: Vec<f32>, ffn: Vec<f32>, vmix: Vec<f32>,
-    lora_w: Vec<f32>, lora_a: Vec<f32>, lora_g: Vec<f32>, lora_v: Vec<f32>,
+    xr: Vec<f32>,
+    xw: Vec<f32>,
+    xk: Vec<f32>,
+    xv: Vec<f32>,
+    xa: Vec<f32>,
+    xg: Vec<f32>,
+    r: Vec<f32>,
+    w: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    a: Vec<f32>,
+    g: Vec<f32>,
+    kk: Vec<f32>,
+    y: Vec<f32>,
+    out: Vec<f32>,
+    ffn: Vec<f32>,
+    vmix: Vec<f32>,
+    lora_w: Vec<f32>,
+    lora_a: Vec<f32>,
+    lora_g: Vec<f32>,
+    lora_v: Vec<f32>,
 }
 
 impl SeqScratch {
@@ -791,11 +912,27 @@ impl SeqScratch {
         let z = || vec![0.0f32; t * e];
         SeqScratch {
             xx: z(),
-            xr: z(), xw: z(), xk: z(), xv: z(), xa: z(), xg: z(),
-            r: z(), w: z(), k: z(), v: z(), a: z(), g: z(),
-            kk: z(), y: z(), out: z(), ffn: vec![0.0; t * c.dim_ffn], vmix: z(),
-            lora_w: vec![0.0; t * MAX_LORA], lora_a: vec![0.0; t * MAX_LORA],
-            lora_g: vec![0.0; t * MAX_LORA], lora_v: vec![0.0; t * MAX_LORA],
+            xr: z(),
+            xw: z(),
+            xk: z(),
+            xv: z(),
+            xa: z(),
+            xg: z(),
+            r: z(),
+            w: z(),
+            k: z(),
+            v: z(),
+            a: z(),
+            g: z(),
+            kk: z(),
+            y: z(),
+            out: z(),
+            ffn: vec![0.0; t * c.dim_ffn],
+            vmix: z(),
+            lora_w: vec![0.0; t * MAX_LORA],
+            lora_a: vec![0.0; t * MAX_LORA],
+            lora_g: vec![0.0; t * MAX_LORA],
+            lora_v: vec![0.0; t * MAX_LORA],
         }
     }
 }
@@ -820,7 +957,8 @@ mod tests {
             .map(|s| s.trim().parse().unwrap())
             .collect();
 
-        let model = Model::load(crate::loader::load(path).expect("load failed")).expect("build failed");
+        let model =
+            Model::load(crate::loader::load(path).expect("load failed")).expect("build failed");
         assert_eq!(model.cfg.n_layer, 3);
         assert_eq!(model.cfg.n_embd, 32);
         assert_eq!(model.cfg.n_head, 2);
@@ -864,7 +1002,9 @@ mod tests {
         let b = crate::loader::load("tests/tiny.safetensors").unwrap();
         assert_eq!(a.len(), b.len());
         for (k, v) in &a {
-            let w = b.get(k).unwrap_or_else(|| panic!("{k} missing from safetensors"));
+            let w = b
+                .get(k)
+                .unwrap_or_else(|| panic!("{k} missing from safetensors"));
             assert_eq!(v.shape, w.shape, "{k}: shape mismatch between loaders");
             assert_eq!(v.data, w.data, "{k}: data mismatch between loaders");
         }

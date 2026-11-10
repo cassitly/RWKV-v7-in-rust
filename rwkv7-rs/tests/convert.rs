@@ -30,7 +30,10 @@ fn scan_finds_shards_via_index() {
     // 16 tensors across two shards, 5 of which the filters remove.
     assert_eq!(all.len(), 16);
     assert!(all.iter().any(|t| t.dtype == "BF16"));
-    assert!(all.iter().any(|t| t.dtype == "F8_E4M3"), "fp8 must survive scanning");
+    assert!(
+        all.iter().any(|t| t.dtype == "F8_E4M3"),
+        "fp8 must survive scanning"
+    );
     assert!(all.iter().any(|t| t.dtype == "I64"));
     // Tensors must come from more than one file.
     let mut sources: Vec<_> = all.iter().map(|t| t.source.clone()).collect();
@@ -46,7 +49,9 @@ fn keys_are_stripped_and_filtered() {
     assert!(names.contains(&"layers.0.self_attn.q_proj.weight".to_string()));
     assert!(names.contains(&"lm_head.weight".to_string()));
     assert!(!names.iter().any(|n| n.starts_with("model.language_model.")));
-    assert!(!names.iter().any(|n| n.starts_with("visual.") || n.starts_with("mtp.")));
+    assert!(!names
+        .iter()
+        .any(|n| n.starts_with("visual.") || n.starts_with("mtp.")));
     assert!(!names.iter().any(|n| n.contains("multi_modal_projector")));
 }
 
@@ -118,7 +123,11 @@ fn pth_records_are_64_byte_aligned() {
     assert_eq!(records.len(), kept.len());
     for name in records {
         let (off, _) = z.data_offset(&name).unwrap();
-        assert_eq!(off % 64, 0, "{name} payload starts at {off}, not 64-byte aligned");
+        assert_eq!(
+            off % 64,
+            0,
+            "{name} payload starts at {off}, not 64-byte aligned"
+        );
     }
     let _ = std::fs::remove_file(&out);
 }
@@ -164,16 +173,23 @@ fn zip64_entry_past_4gib() {
     zr.read_range("archive/data/0", 0, &mut head).unwrap();
     assert!(head.iter().all(|b| *b == 0xAB));
     let mut tail = [0u8; 32];
-    zr.read_range("archive/data/0", size - 32, &mut tail).unwrap();
+    zr.read_range("archive/data/0", size - 32, &mut tail)
+        .unwrap();
     assert!(tail.iter().all(|b| *b == 0xAB), "payload tail is wrong");
 
     // An entry written after the 4 GiB one has a >4 GiB local header offset,
     // which exercises the central directory's offset sentinel.
     let (voff, vsz) = zr.data_offset("archive/version").unwrap();
-    assert!(voff > ZIP64_SENTINEL, "expected a zip64-range offset, got {voff}");
+    assert!(
+        voff > ZIP64_SENTINEL,
+        "expected a zip64-range offset, got {voff}"
+    );
     assert_eq!(vsz, 2);
 
-    println!("zip64 ok: {} byte entry, version record at offset {voff}", size);
+    println!(
+        "zip64 ok: {} byte entry, version record at offset {voff}",
+        size
+    );
     let _ = std::fs::remove_file(&out);
 }
 

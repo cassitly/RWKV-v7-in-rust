@@ -96,7 +96,11 @@ impl ZipWriter {
             pad += ALIGN;
         }
 
-        let stored: u32 = if local_zip64 { 0xFFFF_FFFF } else { size as u32 };
+        let stored: u32 = if local_zip64 {
+            0xFFFF_FFFF
+        } else {
+            size as u32
+        };
 
         self.put(&LOCAL_SIG.to_le_bytes())?;
         self.put(&if local_zip64 { 45u16 } else { 20u16 }.to_le_bytes())?; // version needed
@@ -198,7 +202,11 @@ impl ZipWriter {
                 extra.extend_from_slice(&e.local_header_offset.to_le_bytes());
             }
             let stored: u32 = if big { 0xFFFF_FFFF } else { e.size as u32 };
-            let off32: u32 = if big { 0xFFFF_FFFF } else { e.local_header_offset as u32 };
+            let off32: u32 = if big {
+                0xFFFF_FFFF
+            } else {
+                e.local_header_offset as u32
+            };
 
             self.put(&CDIR_SIG.to_le_bytes())?;
             self.put(&if big { 45u16 } else { 20u16 }.to_le_bytes())?; // version made by

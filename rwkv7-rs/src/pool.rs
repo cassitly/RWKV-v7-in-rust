@@ -47,7 +47,9 @@ pub fn pool() -> &'static Pool {
     POOL.get_or_init(|| {
         let mut n = REQUESTED_THREADS.load(Ordering::SeqCst);
         if n == 0 {
-            n = thread::available_parallelism().map(|v| v.get()).unwrap_or(1);
+            n = thread::available_parallelism()
+                .map(|v| v.get())
+                .unwrap_or(1);
         }
         let n = n.max(1);
 
@@ -55,7 +57,11 @@ pub fn pool() -> &'static Pool {
         // reference is what lets worker threads hold on to it without lifetimes.
         let pool: &'static Pool = Box::leak(Box::new(Pool {
             threads: n,
-            slot: Mutex::new(Slot { task: None, epoch: 0, shutdown: false }),
+            slot: Mutex::new(Slot {
+                task: None,
+                epoch: 0,
+                shutdown: false,
+            }),
             have_work: Condvar::new(),
             work_done: Condvar::new(),
             outstanding: Mutex::new(0),

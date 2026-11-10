@@ -3,6 +3,7 @@
 //! The `rwkv7` binary is the inference CLI; `qwen-make-pth` reuses the zip,
 //! pickle and json modules to convert HuggingFace checkpoints.
 
+pub mod cli;
 pub mod hf;
 pub mod json;
 pub mod loader;
